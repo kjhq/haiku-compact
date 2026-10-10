@@ -1,0 +1,5 @@
+{
+  "name": "haiku-compact",
+  "owner": { "name": "Kripanshu Jindal", "url": "https://github.com/kjhq" },
+  "plugins": [{ "name": "haiku-compact", "source": "./" }]
+}

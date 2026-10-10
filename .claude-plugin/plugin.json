@@ -1,0 +1,33 @@
+{
+  "name": "haiku-compact",
+  "version": "0.1.0",
+  "description": "/compact haiku: compact the conversation with a cheap model, so after a cold prompt cache your main model re-caches a short summary instead of the whole transcript. Never compacts on its own; a status-line hint says when the cache has gone cold.",
+  "author": { "name": "Kripanshu Jindal", "url": "https://github.com/kjhq" },
+  "license": "MIT",
+  "userConfig": {
+    "summaryModel": {
+      "type": "string",
+      "title": "Summary model",
+      "description": "Model that writes the summary, and the word after /compact that selects it (alias or full id).",
+      "default": "haiku"
+    },
+    "keepMessages": {
+      "type": "number",
+      "title": "Messages kept verbatim",
+      "description": "How many recent messages to keep word for word after the summary.",
+      "default": 4
+    },
+    "hintIdleMinutes": {
+      "type": "number",
+      "title": "Cold-cache hint after (minutes)",
+      "description": "Show the status-line hint after this many idle minutes; match your prompt-cache TTL (5 or 60). 0 turns the idle hint off.",
+      "default": 60
+    },
+    "hintMinTokens": {
+      "type": "number",
+      "title": "Cold-cache hint minimum tokens",
+      "description": "Only hint when the context is at least this many tokens.",
+      "default": 40000
+    }
+  }
+}
