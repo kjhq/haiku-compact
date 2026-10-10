@@ -2,7 +2,7 @@
   "name": "haiku-compact",
   "version": "0.3.0",
   "description": "Squish your context with Haiku when the prompt cache goes cold, so your main model re-caches a short summary instead of the whole transcript. One line above the prompt shows up only when the cache is cold, says what a squish saves, then what it saved.",
-  "author": { "name": "Kripanshu Jindal", "url": "https://github.com/kjhq" },
+  "author": { "name": "kjhq", "url": "https://github.com/kjhq" },
   "license": "MIT",
   "types": "./types/index.d.ts",
   "userConfig": {

@@ -1,6 +1,6 @@
 {
   "name": "haiku-compact",
   "description": "squish cold claude code sessions with haiku before your main model re-caches them",
-  "owner": { "name": "Kripanshu Jindal", "url": "https://github.com/kjhq" },
+  "owner": { "name": "kjhq", "url": "https://github.com/kjhq" },
   "plugins": [{ "name": "haiku-compact", "source": "./" }]
 }

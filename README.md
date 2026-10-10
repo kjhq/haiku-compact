@@ -95,4 +95,4 @@ The Claude Code function-hooks API is early access and may change between releas
 
 ## License
 
-[MIT](LICENSE) © Kripanshu Jindal
+[MIT](LICENSE) © kjhq
