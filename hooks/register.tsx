@@ -97,15 +97,14 @@ const add = (a: ModelUsage, b: ModelUsage): ModelUsage => ({
 // summarized by this mod; any other compaction is core's.
 const WORD = /^\s*(\S+)\s*/
 const MIN = 60_000
-const BAR = 10
+// How long the "saved" line stays.
+const DONE_MS = 30_000
 
 const cache = atom({ plugin: 'haiku-compact', key: 'cache' } as const, {
   phase: 'none',
   tokens: 0,
   warmUntil: 0,
 } as CacheState)
-// Ticks so the warm bar drains while nothing else happens.
-const now = atom({ plugin: 'haiku-compact', key: 'now' } as const, 0)
 
 // Set while this mod's own compaction runs, so its session.compact hook answers it.
 let isOurs = false
@@ -114,6 +113,7 @@ let isWarned = false
 // The prompt held back for a `/compact <model>` the mod offered, sent after it.
 let held: string | undefined
 let coldTimer: Timer | undefined
+let doneTimer: Timer | undefined
 
 /** The compaction this mod installs: the older messages summarized by `model`, the tail kept. */
 export async function summarize(
@@ -153,11 +153,27 @@ export const estimateTokens = (messages: readonly SessionMessage[]) =>
 
 export const k = (tokens: number) => `${Math.max(1, Math.round(tokens / 1000))}k`
 
-/** The warm bar: full when the cache was just written, empty as it goes cold. */
-export function warmBar(remainingMs: number, ttlMs: number): string {
-  const full = Math.max(0, Math.min(BAR, Math.ceil((remainingMs / ttlMs) * BAR)))
-  return '▰'.repeat(full) + '▱'.repeat(BAR - full)
+export const usd = (dollars: number) => `$${dollars < 0.1 ? dollars.toFixed(3) : dollars.toFixed(2)}`
+
+/**
+ * The input-token price a turn implies: what it cost over its tokens, each
+ * weighed by the API's ratio to plain input (cache write `writeWeight`, cache
+ * read 0.1, output 5). Undefined when the turn says too little to tell.
+ */
+export function inputRate(costUsd: number, u: ModelUsage, writeWeight: number): number | undefined {
+  const units =
+    u.input_tokens + writeWeight * u.cache_creation_input_tokens + 0.1 * u.cache_read_input_tokens + 5 * u.output_tokens
+  return costUsd > 0 && units >= 1_000 ? costUsd / units : undefined
 }
+
+/** What re-caching `tokens` costs, and what a squish would save of it, at `rate` dollars an input token. */
+export function savings(tokens: number, rate: number, writeWeight: number, share: number) {
+  const full = tokens * writeWeight * rate
+  return { full, saved: full * (1 - share) }
+}
+
+/** The session's cost so far, or undefined where the engine does not say. */
+const costNow = ($: EngineInterface) => $.session.usage().then(u => u.cost?.usd, () => undefined)
 
 /** Compacts now through this mod; throws where the engine refuses a compaction (mid-turn). */
 async function compactCold($: EngineInterface): Promise<void> {
@@ -200,14 +216,21 @@ export const register: Register = (on, options) => {
   const isAutoResume = options.autoCompactOnResume !== false
   const isHolding = options.holdPromptWhenCold !== false
 
-  on('session.start', async ($, e, next) => {
-    const done = await next(e)
-    await update($, now, () => 0)
-    $.clock.every(30_000, () => {
-      void $.clock.now().then(t => update($, now, () => t))
-    })
-    return done
-  })
+  // Dollars a plain input token costs on the session model, learned from the engine.
+  let rate: number | undefined
+  // The share of the context a squish keeps; the last one sets it.
+  let share = 0.15
+  // The session cost when the current turn began.
+  let costAtStart: number | undefined
+
+  // A cache write costs this many plain input tokens: 2x for the 1h cache, 1.25x for 5m.
+  const writeWeight = ttlMs >= 60 * MIN ? 2 : 1.25
+
+  /** Cold, with the price of re-caching `tokens` when it is known. */
+  const goCold = (c: CacheState, tokens: number, fullUsd?: number): CacheState => {
+    const full = fullUsd ?? (rate === undefined ? undefined : savings(tokens, rate, writeWeight, share).full)
+    return { ...c, phase: 'cold', tokens, warmUntil: 0, costUsd: full, note: undefined }
+  }
 
   on('classic.SessionStart', async ($, e, next) => {
     const done = await next(e)
@@ -215,7 +238,9 @@ export const register: Register = (on, options) => {
     const tokens = e.context_tokens ?? 0
     if (!isResume || !e.prompt_cache_likely_expired || tokens < minTokens) return done
 
-    await update($, cache, () => ({ phase: 'cold' as const, tokens, warmUntil: 0, costUsd: e.estimated_cache_write_usd }))
+    const est = e.estimated_cache_write_usd ?? 0
+    if (est > 0) rate = est / (tokens * writeWeight)
+    await update($, cache, c => goCold(c, tokens, est || undefined))
     if (!isAutoResume) return done
     try {
       await compactCold($)
@@ -228,6 +253,7 @@ export const register: Register = (on, options) => {
   on('turn.start', async ($, e, next) => {
     coldTimer?.cancel()
     coldTimer = undefined
+    costAtStart = await costNow($)
     return next(e)
   })
 
@@ -235,17 +261,22 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     if (e.agentId !== undefined) return done
     isWarned = false
-    const tokens = (await $.session.usage()).context.tokens ?? 0
+    const usage = await $.session.usage()
+    if (e.usage && costAtStart !== undefined && usage.cost) {
+      rate = inputRate(usage.cost.usd - costAtStart, e.usage, writeWeight) ?? rate
+    }
+    const tokens = usage.context.tokens ?? 0
     if (tokens < minTokens) {
       await update($, cache, () => ({ phase: 'none' as const, tokens, warmUntil: 0 }))
       return done
     }
+    // Warm: nothing to show. The band appears once the cache goes cold.
     const at = await $.clock.now()
-    await update($, now, () => at)
-    await update($, cache, () => ({ phase: 'warm' as const, tokens, warmUntil: at + ttlMs }))
+    // A "saved" line still showing keeps its few seconds.
+    await update($, cache, c => ({ ...c, phase: c.phase === 'done' ? c.phase : ('warm' as const), tokens, warmUntil: at + ttlMs, note: undefined }))
     coldTimer?.cancel()
     coldTimer = $.clock.after(ttlMs, () => {
-      void update($, cache, c => (c.phase === 'warm' ? { ...c, phase: 'cold' as const } : c))
+      void update($, cache, c => (c.phase === 'warm' || c.phase === 'done' ? goCold(c, c.tokens) : c))
     })
     return done
   })
@@ -270,14 +301,26 @@ export const register: Register = (on, options) => {
     if ((!isOurs && !isAsked) || e.agentId !== undefined) return next(e)
     if (!Array.isArray(e.messages)) return { skip: 'no transcript to summarize' }
 
-    const before = (await read($, cache)).tokens || estimateTokens(e.messages)
+    const state = await read($, cache)
+    const before = state.tokens || estimateTokens(e.messages)
+    const fullUsd = state.costUsd ?? (rate === undefined ? undefined : savings(before, rate, writeWeight, share).full)
     await update($, cache, c => ({ ...c, phase: 'compacting' as const, tokens: before, note: undefined }))
     const notes = isAsked ? e.instructions!.replace(WORD, '').trim() || undefined : undefined
+    const costBefore = await costNow($)
     const done = await summarize($, model, e.messages, keep, notes)
 
     if (done.skip === undefined) {
-      const after = estimateTokens(done.messages)
-      await update($, cache, () => ({ phase: 'done' as const, tokens: after, warmUntil: 0, before, after }))
+      const after = Math.min(before, estimateTokens(done.messages))
+      share = after / before
+      // The summary's own price, where the session ledger counted it.
+      const costAfter = await costNow($)
+      const spent = costBefore === undefined || costAfter === undefined ? 0 : Math.max(0, costAfter - costBefore)
+      const savedUsd = fullUsd === undefined ? undefined : fullUsd * (1 - share) - spent
+      await update($, cache, () => ({ phase: 'done' as const, tokens: after, warmUntil: 0, before, after, savedUsd }))
+      doneTimer?.cancel()
+      doneTimer = $.clock.after(DONE_MS, () => {
+        void update($, cache, c => (c.phase === 'done' ? { ...c, phase: c.warmUntil ? ('warm' as const) : ('none' as const) } : c))
+      })
     } else {
       await update($, cache, c => ({ ...c, phase: 'cold' as const, note: done.skip }))
     }
@@ -294,67 +337,35 @@ export const register: Register = (on, options) => {
     next.called ? next(e) : { skip: `${model} summary failed` },
   )
 
+  // One line, only when there is something to act on or to celebrate.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const state = await read($, cache)
-    if (state.phase === 'none') return next(e)
-
     const { Box, Button, Text } = $.ui.resolve(e)
 
-    if (state.phase === 'warm') {
-      const left = state.warmUntil - Math.max(await read($, now), await $.clock.now())
-      const mins = Math.max(0, Math.ceil(left / MIN))
-      return (
-        <Box gap={1}>
-          <Text>🔥</Text>
-          <Text color="warning">{warmBar(left, ttlMs)}</Text>
-          <Text dimColor>
-            {`cache warm · ${mins}m left · ${k(state.tokens)} cached`}
-          </Text>
-        </Box>
-      )
-    }
-
     if (state.phase === 'cold') {
-      const cost = state.costUsd ? ` (~$${state.costUsd.toFixed(2)})` : ''
+      const price =
+        state.costUsd === undefined
+          ? `${k(state.tokens)} to re-cache`
+          : `squish saves ~${usd(state.costUsd * (1 - share))} of ${usd(state.costUsd)}`
       return (
         <Box gap={1}>
-          <Text>🧊</Text>
-          <Text color="suggestion" bold>
-            cache cold
-          </Text>
-          <Text dimColor>
-            {`· ${k(state.tokens)} to re-cache${cost}${state.note ? ` · ${state.note}` : ''}`}
-          </Text>
-          <Button key="squish" label={`squish with ${model}`} variant="primary" onPress={() => pressCompact($, model)} />
+          <Text color="suggestion">{`🧊 cache cold · ${price}${state.note ? ` · ${state.note}` : ''}`}</Text>
+          <Button key="squish" label="squish" variant="primary" onPress={() => pressCompact($, model)} />
         </Box>
       )
     }
 
     if (state.phase === 'compacting') {
-      return (
-        <Box gap={1}>
-          <Text>🌀</Text>
-          <Text color="claude">
-            {`${model} is squishing ${k(state.tokens)} of context…`}
-          </Text>
-        </Box>
-      )
+      return <Text color="claude">{`🌀 ${model} squishing ${k(state.tokens)}…`}</Text>
     }
 
-    const before = state.before ?? 0
-    const after = state.after ?? 0
-    const saved = before > 0 ? Math.round((1 - after / before) * 100) : 0
-    return (
-      <Box gap={1}>
-        <Text>✨</Text>
-        <Text color="success" bold>
-          {`squished ${k(before)} → ${k(after)}`}
-        </Text>
-        <Text dimColor>
-          {`(−${saved}%) by ${model} · next turn re-caches the small one`}
-        </Text>
-      </Box>
-    )
+    if (state.phase === 'done') {
+      const what = `${k(state.before ?? 0)} → ${k(state.after ?? 0)}`
+      const saved = state.savedUsd === undefined ? what : `saved ~${usd(Math.max(0, state.savedUsd))} · ${what}`
+      return <Text color="success">{`✨ ${saved}`}</Text>
+    }
+
+    return next(e)
   })
 }

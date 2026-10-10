@@ -16,14 +16,15 @@ Answer `y` to add the marketplace, then pick a scope.
 
 ## What it does
 
-A band above the prompt shows your cache as it goes:
+While the cache is warm you see nothing. Once it goes cold, one line shows above the prompt:
 
 ```
-🔥 ▰▰▰▰▰▰▱▱▱▱ cache warm · 36m left · 204k cached
-🧊 cache cold · 204k to re-cache (~$0.77)  [ squish with haiku ]
-🌀 haiku is squishing 204k of context…
-✨ squished 204k → 9k (−96%) by haiku · next turn re-caches the small one
+🧊 cache cold · squish saves ~$1.70 of $2.00  [ squish ]
+🌀 haiku squishing 204k…
+✨ saved ~$1.68 · 204k → 9k
 ```
+
+The "saved" line goes away after 30 seconds. Prices come from Claude Code itself: its estimate on resume, or the rate implied by what your last turn cost. Before it knows a price, the line says `204k to re-cache` instead. The saving is net of what the Haiku summary cost, when Claude Code counts that.
 
 Small contexts (under 40k tokens) get no band and are never touched.
 
@@ -31,7 +32,7 @@ When the cache is cold:
 
 - **On resume.** Resuming a large session whose cache has expired squishes it with Haiku at once.
 - **In an open session.** Your first prompt after the cache went cold is held, and `/compact haiku` is put in the prompt box. Press Enter to squish; your held prompt is sent right after. Or send your prompt again to skip that and use the full context.
-- **Any time.** Press *squish with haiku* in the band, or type it yourself:
+- **Any time.** Press *squish* in the band, or type it yourself:
 
 ```
 /compact haiku
@@ -56,7 +57,7 @@ Set in `/config` or under `pluginConfigs` in `settings.json`:
 | --- | --- | --- |
 | `summaryModel` | `haiku` | Model that summarizes, and the word after `/compact` that selects it. |
 | `keepMessages` | `4` | Recent messages kept verbatim. |
-| `cacheTtlMinutes` | `60` | Your cache TTL (60 or 5). The band counts down from it. |
+| `cacheTtlMinutes` | `60` | Your cache TTL (60 or 5). The band shows once it has passed. |
 | `minTokens` | `40000` | Smaller contexts get no band and no compaction. |
 | `autoCompactOnResume` | `true` | Squish at once when resuming a cold session. |
 | `holdPromptWhenCold` | `true` | Hold the first prompt after the cache went cold and offer `/compact haiku`. |

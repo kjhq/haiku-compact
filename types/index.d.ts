@@ -12,12 +12,14 @@ export type CacheState = {
   /** Context before and after the last compaction, in tokens. */
   before?: number
   after?: number
+  /** Dollars the last squish saved, net of the summary, when prices were known. */
+  savedUsd?: number
   /** One line about the last thing that went wrong, if anything. */
   note?: string
 }
 
 declare module 'claude-code' {
   interface PluginState {
-    'haiku-compact': { cache: CacheState; now: number }
+    'haiku-compact': { cache: CacheState }
   }
 }
