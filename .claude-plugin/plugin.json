@@ -1,9 +1,10 @@
 {
   "name": "haiku-compact",
-  "version": "0.1.0",
-  "description": "/compact haiku: compact the conversation with a cheap model, so after a cold prompt cache your main model re-caches a short summary instead of the whole transcript. Never compacts on its own; a status-line hint says when the cache has gone cold.",
+  "version": "0.2.0",
+  "description": "Squish your context with Haiku when the prompt cache goes cold, so your main model re-caches a short summary instead of the whole transcript. A live band shows the cache warming down, going cold and getting squished.",
   "author": { "name": "Kripanshu Jindal", "url": "https://github.com/kjhq" },
   "license": "MIT",
+  "types": "./types/index.d.ts",
   "userConfig": {
     "summaryModel": {
       "type": "string",
@@ -17,17 +18,29 @@
       "description": "How many recent messages to keep word for word after the summary.",
       "default": 4
     },
-    "hintIdleMinutes": {
+    "cacheTtlMinutes": {
       "type": "number",
-      "title": "Cold-cache hint after (minutes)",
-      "description": "Show the status-line hint after this many idle minutes; match your prompt-cache TTL (5 or 60). 0 turns the idle hint off.",
+      "title": "Prompt-cache TTL (minutes)",
+      "description": "How long your prompt cache stays warm: 60 or 5. The band counts down from it.",
       "default": 60
     },
-    "hintMinTokens": {
+    "minTokens": {
       "type": "number",
-      "title": "Cold-cache hint minimum tokens",
-      "description": "Only hint when the context is at least this many tokens.",
+      "title": "Minimum context tokens",
+      "description": "Smaller contexts are left alone: no band, no compaction.",
       "default": 40000
+    },
+    "autoCompactOnResume": {
+      "type": "boolean",
+      "title": "Compact on a cold resume",
+      "description": "Resuming a session whose cache has gone cold squishes it with the summary model at once.",
+      "default": true
+    },
+    "holdPromptWhenCold": {
+      "type": "boolean",
+      "title": "Hold the first prompt when cold",
+      "description": "Hold your first prompt after the cache went cold and offer /compact haiku first; sending it again skips that.",
+      "default": true
     }
   }
 }

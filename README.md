@@ -1,10 +1,10 @@
 # haiku-compact
 
-A Claude Code mod that compacts your conversation with a cheap model.
+A Claude Code mod that compacts your conversation with a cheap model when the prompt cache goes cold.
 
-Claude Code keeps your conversation in the prompt cache for a short while (5 minutes or 1 hour). Step away longer and the cache goes cold: your next message makes the main model re-read and re-cache the whole transcript at full price. On a 200k-token Opus session that is a real cost, paid again every time you come back.
+Claude Code keeps your conversation in the prompt cache for a while (5 minutes or 1 hour). Step away longer and the cache goes cold: your next message makes the main model re-read and re-cache the whole transcript at full price. On a 200k-token Opus session that is a real cost, paid again every time you come back.
 
-`/compact haiku` summarizes the conversation with Haiku instead of your main model. Haiku reads the transcript at a fraction of the price, and your main model then only re-caches a short summary. Your session model never changes.
+This mod summarizes the conversation with Haiku instead. Haiku reads the transcript at a fraction of the price, and your main model then only re-caches a short summary. Your session model never changes.
 
 ## Install
 
@@ -14,22 +14,31 @@ Claude Code keeps your conversation in the prompt cache for a short while (5 min
 
 Answer `y` to add the marketplace, then pick a scope.
 
-## Use
+## What it does
+
+A band above the prompt shows your cache as it goes:
+
+```
+🔥 ▰▰▰▰▰▰▱▱▱▱ cache warm · 36m left · 204k cached
+🧊 cache cold · 204k to re-cache (~$0.77)  [ squish with haiku ]
+🌀 haiku is squishing 204k of context…
+✨ squished 204k → 9k (−96%) by haiku · next turn re-caches the small one
+```
+
+Small contexts (under 40k tokens) get no band and are never touched.
+
+When the cache is cold:
+
+- **On resume.** Resuming a large session whose cache has expired squishes it with Haiku at once.
+- **In an open session.** Your first prompt after the cache went cold is held, and `/compact haiku` is put in the prompt box. Press Enter to squish; your held prompt is sent right after. Or send your prompt again to skip that and use the full context.
+- **Any time.** Press *squish with haiku* in the band, or type it yourself:
 
 ```
 /compact haiku
 /compact haiku keep the deployment plan and the open bugs
 ```
 
-Anything after `haiku` is passed to the summarizer as what to keep or stress. Plain `/compact` and auto-compaction are left to Claude Code as usual.
-
-The mod never compacts on its own. When the cache has likely gone cold (after a resume, or after a long idle in an open session) and the context is large, it shows a hint in the status line:
-
-```
-cache cold · 204k to re-cache (~$0.77) · /compact haiku to shrink it
-```
-
-The hint clears when the next turn starts.
+Anything after `haiku` is passed to the summarizer as what to keep or stress. Plain `/compact` and Claude Code's own auto-compaction are left alone.
 
 ## What the summary keeps
 
@@ -47,12 +56,16 @@ Set in `/config` or under `pluginConfigs` in `settings.json`:
 | --- | --- | --- |
 | `summaryModel` | `haiku` | Model that summarizes, and the word after `/compact` that selects it. |
 | `keepMessages` | `4` | Recent messages kept verbatim. |
-| `hintIdleMinutes` | `60` | Idle minutes before the cold-cache hint. Match your cache TTL (5 or 60). `0` turns the idle hint off. |
-| `hintMinTokens` | `40000` | Only hint for contexts at least this large. |
+| `cacheTtlMinutes` | `60` | Your cache TTL (60 or 5). The band counts down from it. |
+| `minTokens` | `40000` | Smaller contexts get no band and no compaction. |
+| `autoCompactOnResume` | `true` | Squish at once when resuming a cold session. |
+| `holdPromptWhenCold` | `true` | Hold the first prompt after the cache went cold and offer `/compact haiku`. |
 
 ## Trade-offs
 
-A summary is lossy, and a smaller model loses more than a larger one. On long technical sessions, exact details from early in the conversation may not survive. Use the notes after `/compact haiku` to name what must be kept.
+A summary is lossy, and a smaller model loses more than a larger one. On long technical sessions, exact details from early in the conversation may not survive. Use the notes after `/compact haiku` to name what must be kept, or turn the automatic parts off and squish only when you choose.
+
+The idle countdown is an estimate from the time of the last turn; the engine's own cache-expiry flag is used on resume.
 
 ## Develop
 
